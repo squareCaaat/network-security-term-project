@@ -1,2 +1,41 @@
-.venv/
-.docs/
+# 빌드 산출물
+build/
+*.o
+server
+!server/
+client
+!client/
+
+# 데이터베이스
+data/*.db
+
+# 인증서 (보안상 git에 포함하지 않음)
+certs/*.key
+certs/*.crt
+certs/*.csr
+certs/*.srl
+
+# 로그 파일
+*.log
+
+# 임시 파일
+*.tmp
+*.swp
+*~
+
+# IDE 설정
+.vscode/
+.idea/
+*.sublime-*
+
+# OS 관련
+.DS_Store
+Thumbs.db
+
+# 테스트 파일
+/tmp/
+test_*.txt
+test_*.sh
+
+# Markdown
+*.md
