@@ -146,12 +146,6 @@ int storage_delete_item(int item_id, const char* owner_email) {
     return -1;
 }
 
-/* 아이템 메모리 해제 */
-void storage_free_item(VaultItem* item) {
-    // 실제로는 전역 배열에 저장되므로 해제하지 않음
-    // 이 함수는 외부 API 일관성을 위해 존재
-}
-
 /* 아이템 목록 메모리 해제 */
 void storage_free_item_list(VaultItem** items_list, int count) {
     free(items_list);
