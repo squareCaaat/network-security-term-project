@@ -1,7 +1,7 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -std=c11 -I/usr/include/x86_64-linux-gnu
 LDFLAGS = -L/usr/lib/x86_64-linux-gnu
-LIBS = -lssl -lcrypto
+LIBS = -lssl -lcrypto -lreadline
 
 # 디렉토리
 SRC_COMMON = src/common
