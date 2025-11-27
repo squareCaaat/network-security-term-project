@@ -135,6 +135,55 @@ static char* parse_quoted_argument(char** cursor) {
     return result;
 }
 
+static char* prompt_hidden_input(const char* prompt) {
+    int is_tty = isatty(STDIN_FILENO);
+    struct termios oldt;
+    if (is_tty) {
+        if (tcgetattr(STDIN_FILENO, &oldt) != 0) {
+            if (errno != ENOTTY) {
+                perror("tcgetattr");
+            }
+            is_tty = 0;
+        }
+    }
+
+    if (is_tty) {
+        struct termios newt = oldt;
+        newt.c_lflag &= ~(ECHO);
+        if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &newt) != 0) {
+            if (errno != ENOTTY) {
+                perror("tcsetattr");
+            }
+            is_tty = 0;
+        }
+    }
+
+    printf("%s", prompt);
+    fflush(stdout);
+
+    char* line = NULL;
+    size_t len = 0;
+    ssize_t read = getline(&line, &len, stdin);
+
+    if (is_tty) {
+        tcsetattr(STDIN_FILENO, TCSAFLUSH, &oldt);
+        printf("\n");
+    } else {
+        printf("\n");
+    }
+
+    if (read <= 0) {
+        free(line);
+        return NULL;
+    }
+
+    if (line[read - 1] == '\n') {
+        line[read - 1] = '\0';
+    }
+
+    return line;
+}
+
 /* 요청 전송 및 응답 수신 */
 static char* send_request(const char* request) {
     if (!ssl) {
@@ -290,61 +339,6 @@ static void cmd_login(const char* email, const char* password) {
 }
 
 /* 데이터 저장 */
-static char* duplicate_range(const char* start, size_t len) {
-    char* buf = malloc(len + 1);
-    if (!buf) return NULL;
-    memcpy(buf, start, len);
-    buf[len] = '\0';
-    return buf;
-}
-
-static char* duplicate_cstring(const char* str) {
-    if (!str) return NULL;
-    return duplicate_range(str, strlen(str));
-}
-
-static void rtrim(char* str) {
-    if (!str) return;
-    size_t len = strlen(str);
-    while (len > 0 && (str[len - 1] == ' ' || str[len - 1] == '\t')) {
-        str[len - 1] = '\0';
-        len--;
-    }
-}
-
-static char* parse_quoted_argument(char** cursor) {
-    if (!cursor || !*cursor) return NULL;
-    char* ptr = *cursor;
-    while (*ptr == ' ') ptr++;
-    if (*ptr == '\0') {
-        *cursor = ptr;
-        return NULL;
-    }
-
-    char* result = NULL;
-    if (*ptr == '\"') {
-        ptr++;
-        char* end = strchr(ptr, '\"');
-        if (end) {
-            result = duplicate_range(ptr, (size_t)(end - ptr));
-            ptr = end + 1;
-        } else {
-            // 닫는 따옴표가 없으면 나머지 전체 사용
-            result = duplicate_cstring(ptr);
-            ptr += strlen(ptr);
-        }
-    } else {
-        char* end = ptr;
-        while (*end && *end != ' ') end++;
-        result = duplicate_range(ptr, (size_t)(end - ptr));
-        ptr = end;
-    }
-
-    while (*ptr == ' ') ptr++;
-    *cursor = ptr;
-    return result;
-}
-
 static void cmd_put(const char* plaintext, const char* meta) {
     if (session_token[0] == '\0') {
         printf("✗ Please login first\n");
@@ -560,23 +554,27 @@ int main(int argc, char* argv[]) {
     printf("✓ Connected to server (TLS 1.3)\n\n");
     
     // 간단한 CLI
-    char line[1024];
     printf("Commands:\n");
-    printf("  register <email> <password>\n");
-    printf("  login <email> <password>\n");
-    printf("  put <meta> <text>  (meta can be a single word, text can have spaces)\n");
+    printf("  register <email>\n");
+    printf("  login <email>\n");
+    printf("  put <meta> <text>  (meta/text may be wrapped in quotes)\n");
     printf("  get <id>\n");
     printf("  list\n");
     printf("  quit\n\n");
     
     while (1) {
-        printf("> ");
-        if (!fgets(line, sizeof(line), stdin)) break;
+        char* line = readline("> ");
+        if (!line) {
+            printf("\n");
+            break;
+        }
         
-        // 개행 제거
-        line[strcspn(line, "\n")] = '\0';
+        if (strlen(line) == 0) {
+            free(line);
+            continue;
+        }
         
-        if (strlen(line) == 0) continue;
+        add_history(line);
         
         // 명령어 추출
         char* ptr = line;
@@ -598,32 +596,64 @@ int main(int argc, char* argv[]) {
         
         // 명령 처리
         if (strcmp(cmd, "quit") == 0 || strcmp(cmd, "exit") == 0) {
+            free(line);
             break;
         } else if (strcmp(cmd, "register") == 0) {
-            // register <email> <password>
-            char* arg1_end = strchr(ptr, ' ');
-            if (arg1_end) {
-                *arg1_end = '\0';
-                char* arg2 = arg1_end + 1;
-                while (*arg2 == ' ') arg2++;
-                cmd_register(ptr, arg2);
-            } else {
-                printf("Usage: register <email> <password>\n");
+            char* parse_cursor = ptr;
+            char* email = parse_quoted_argument(&parse_cursor);
+            if (!email || strlen(email) == 0) {
+                printf("Usage: register <email>\n");
+                free(email);
+                free(line);
+                continue;
             }
+            
+            char* password = prompt_hidden_input("Password: ");
+            if (!password || strlen(password) == 0) {
+                printf("Password cannot be empty\n");
+                if (password) {
+                    secure_zero(password, strlen(password));
+                    free(password);
+                }
+                free(email);
+                free(line);
+                continue;
+            }
+            
+            cmd_register(email, password);
+            secure_zero(password, strlen(password));
+            free(password);
+            free(email);
         } else if (strcmp(cmd, "login") == 0) {
-            // login <email> <password>
-            char* arg1_end = strchr(ptr, ' ');
-            if (arg1_end) {
-                *arg1_end = '\0';
-                char* arg2 = arg1_end + 1;
-                while (*arg2 == ' ') arg2++;
-                cmd_login(ptr, arg2);
-            } else {
-                printf("Usage: login <email> <password>\n");
+            char* parse_cursor = ptr;
+            char* email = parse_quoted_argument(&parse_cursor);
+            if (!email || strlen(email) == 0) {
+                printf("Usage: login <email>\n");
+                free(email);
+                free(line);
+                continue;
             }
+            
+            char* password = prompt_hidden_input("Password: ");
+            if (!password || strlen(password) == 0) {
+                printf("Password cannot be empty\n");
+                if (password) {
+                    secure_zero(password, strlen(password));
+                    free(password);
+                }
+                free(email);
+                free(line);
+                continue;
+            }
+            
+            cmd_login(email, password);
+            secure_zero(password, strlen(password));
+            free(password);
+            free(email);
         } else if (strcmp(cmd, "put") == 0) {
             if (strlen(ptr) == 0) {
                 printf("Usage: put <meta> <text>\n");
+                free(line);
                 continue;
             }
 
@@ -632,6 +662,7 @@ int main(int argc, char* argv[]) {
             if (!meta || strlen(meta) == 0) {
                 printf("Usage: put <meta> <text>\n");
                 free(meta);
+                free(line);
                 continue;
             }
 
@@ -639,6 +670,7 @@ int main(int argc, char* argv[]) {
             if (*parse_cursor == '\0') {
                 printf("Usage: put <meta> <text>\n");
                 free(meta);
+                free(line);
                 continue;
             } else if (*parse_cursor == '\"') {
                 text = parse_quoted_argument(&parse_cursor);
@@ -651,6 +683,7 @@ int main(int argc, char* argv[]) {
                 printf("Usage: put <meta> <text>\n");
                 free(meta);
                 free(text);
+                free(line);
                 continue;
             }
 
@@ -671,6 +704,8 @@ int main(int argc, char* argv[]) {
             printf("Unknown command: %s\n", cmd);
             printf("Type 'quit' to exit\n");
         }
+        
+        free(line);
     }
     
     // 정리
