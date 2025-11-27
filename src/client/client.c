@@ -1,7 +1,12 @@
+#define _POSIX_C_SOURCE 200809L
 #include <stdio.h>
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <termios.h>
+#include <readline/readline.h>
+#include <readline/history.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -73,6 +78,61 @@ static int json_get_int(const char* json, const char* key) {
     
     start += strlen(search);
     return atoi(start);
+}
+
+/* 문자열 헬퍼 */
+static char* duplicate_range(const char* start, size_t len) {
+    char* buf = malloc(len + 1);
+    if (!buf) return NULL;
+    memcpy(buf, start, len);
+    buf[len] = '\0';
+    return buf;
+}
+
+static char* duplicate_cstring(const char* str) {
+    if (!str) return NULL;
+    return duplicate_range(str, strlen(str));
+}
+
+static void rtrim(char* str) {
+    if (!str) return;
+    size_t len = strlen(str);
+    while (len > 0 && (str[len - 1] == ' ' || str[len - 1] == '\t')) {
+        str[len - 1] = '\0';
+        len--;
+    }
+}
+
+static char* parse_quoted_argument(char** cursor) {
+    if (!cursor || !*cursor) return NULL;
+    char* ptr = *cursor;
+    while (*ptr == ' ') ptr++;
+    if (*ptr == '\0') {
+        *cursor = ptr;
+        return NULL;
+    }
+
+    char* result = NULL;
+    if (*ptr == '\"') {
+        ptr++;
+        char* end = strchr(ptr, '\"');
+        if (end) {
+            result = duplicate_range(ptr, (size_t)(end - ptr));
+            ptr = end + 1;
+        } else {
+            result = duplicate_cstring(ptr);
+            ptr += strlen(ptr);
+        }
+    } else {
+        char* end = ptr;
+        while (*end && *end != ' ') end++;
+        result = duplicate_range(ptr, (size_t)(end - ptr));
+        ptr = end;
+    }
+
+    while (*ptr == ' ') ptr++;
+    *cursor = ptr;
+    return result;
 }
 
 /* 요청 전송 및 응답 수신 */
