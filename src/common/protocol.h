@@ -11,6 +11,8 @@
 #define MSG_PUT         4
 #define MSG_GET         5
 #define MSG_LIST        6
+#define MSG_UPDATE      7
+#define MSG_DELETE      8
 #define MSG_RESPONSE    100
 
 /* 상태 코드 */
