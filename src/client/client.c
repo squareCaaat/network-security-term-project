@@ -404,6 +404,95 @@ static void cmd_put(const char* plaintext, const char* meta) {
     secure_zero(tag, TAG_LEN);
 }
 
+static void cmd_update(int item_id, const char* plaintext, const char* meta) {
+    if (session_token[0] == '\0') {
+        printf("✗ Please login first\n");
+        return;
+    }
+    if (item_id <= 0) {
+        printf("✗ Invalid item id\n");
+        return;
+    }
+    
+    unsigned char iv[IV_LEN];
+    generate_random_bytes(iv, IV_LEN);
+    
+    size_t plaintext_len = strlen(plaintext);
+    unsigned char* ciphertext = malloc(plaintext_len + 16);
+    unsigned char tag[TAG_LEN];
+    
+    int ciphertext_len = aes_gcm_encrypt(
+        (unsigned char*)plaintext, plaintext_len,
+        master_key, iv, NULL, 0,
+        ciphertext, tag
+    );
+    
+    if (ciphertext_len < 0) {
+        printf("✗ Encryption failed\n");
+        free(ciphertext);
+        return;
+    }
+    
+    size_t iv_b64_len, tag_b64_len, blob_b64_len;
+    char* iv_b64 = base64_encode(iv, IV_LEN, &iv_b64_len);
+    char* tag_b64 = base64_encode(tag, TAG_LEN, &tag_b64_len);
+    char* blob_b64 = base64_encode(ciphertext, ciphertext_len, &blob_b64_len);
+    
+    char* request = malloc(blob_b64_len + 2048);
+    snprintf(request, blob_b64_len + 2048,
+            "{\"type\":\"UPDATE\",\"token\":\"%s\",\"item_id\":%d,\"iv\":\"%s\",\"tag\":\"%s\",\"blob\":\"%s\",\"meta\":\"%s\"}",
+            session_token, item_id, iv_b64, tag_b64, blob_b64, meta ? meta : "");
+    
+    char* response = send_request(request);
+    if (response) {
+        int status = json_get_int(response, "status");
+        if (status == STATUS_OK) {
+            printf("✓ Item %d updated\n", item_id);
+        } else {
+            char* message = json_get_string(response, "message");
+            printf("✗ Update failed: %s\n", message ? message : "Unknown error");
+            free(message);
+        }
+        free(response);
+    }
+    
+    free(request);
+    free(iv_b64);
+    free(tag_b64);
+    free(blob_b64);
+    free(ciphertext);
+    secure_zero(iv, IV_LEN);
+    secure_zero(tag, TAG_LEN);
+}
+
+static void cmd_delete(int item_id) {
+    if (session_token[0] == '\0') {
+        printf("✗ Please login first\n");
+        return;
+    }
+    if (item_id <= 0) {
+        printf("✗ Invalid item id\n");
+        return;
+    }
+    
+    char request[512];
+    snprintf(request, sizeof(request),
+             "{\"type\":\"DELETE\",\"token\":\"%s\",\"item_id\":%d}",
+             session_token, item_id);
+    
+    char* response = send_request(request);
+    if (response) {
+        int status = json_get_int(response, "status");
+        if (status == STATUS_OK) {
+            printf("✓ Item %d deleted\n", item_id);
+        } else {
+            char* message = json_get_string(response, "message");
+            printf("✗ Delete failed: %s\n", message ? message : "Unknown error");
+            free(message);
+        }
+        free(response);
+    }
+}
 /* 데이터 조회 */
 static void cmd_get(int item_id) {
     if (session_token[0] == '\0') {
@@ -558,6 +647,8 @@ int main(int argc, char* argv[]) {
     printf("  register <email>\n");
     printf("  login <email>\n");
     printf("  put <meta> <text>  (meta/text may be wrapped in quotes)\n");
+    printf("  update <id> <meta> <text>\n");
+    printf("  delete <id>\n");
     printf("  get <id>\n");
     printf("  list\n");
     printf("  quit\n\n");
@@ -690,6 +781,86 @@ int main(int argc, char* argv[]) {
             cmd_put(text, meta);
             free(meta);
             free(text);
+        } else if (strcmp(cmd, "update") == 0) {
+            if (strlen(ptr) == 0) {
+                printf("Usage: update <id> <meta> <text>\n");
+                free(line);
+                continue;
+            }
+            
+            char* parse_cursor = ptr;
+            char* id_str = parse_quoted_argument(&parse_cursor);
+            if (!id_str || strlen(id_str) == 0) {
+                printf("Usage: update <id> <meta> <text>\n");
+                free(id_str);
+                free(line);
+                continue;
+            }
+            int item_id = atoi(id_str);
+            free(id_str);
+            if (item_id <= 0) {
+                printf("✗ Invalid item id\n");
+                free(line);
+                continue;
+            }
+            
+            char* meta = parse_quoted_argument(&parse_cursor);
+            if (!meta || strlen(meta) == 0) {
+                printf("Usage: update <id> <meta> <text>\n");
+                free(meta);
+                free(line);
+                continue;
+            }
+            
+            char* text = NULL;
+            if (*parse_cursor == '\0') {
+                printf("Usage: update <id> <meta> <text>\n");
+                free(meta);
+                free(line);
+                continue;
+            } else if (*parse_cursor == '\"') {
+                text = parse_quoted_argument(&parse_cursor);
+            } else {
+                text = duplicate_cstring(parse_cursor);
+                rtrim(text);
+            }
+            
+            if (!text || strlen(text) == 0) {
+                printf("Usage: update <id> <meta> <text>\n");
+                free(meta);
+                free(text);
+                free(line);
+                continue;
+            }
+            
+            cmd_update(item_id, text, meta);
+            free(meta);
+            free(text);
+        } else if (strcmp(cmd, "delete") == 0) {
+            if (strlen(ptr) == 0) {
+                printf("Usage: delete <id>\n");
+                free(line);
+                continue;
+            }
+            
+            char* parse_cursor = ptr;
+            char* id_str = parse_quoted_argument(&parse_cursor);
+            if (!id_str || strlen(id_str) == 0) {
+                printf("Usage: delete <id>\n");
+                free(id_str);
+                free(line);
+                continue;
+            }
+            int item_id = atoi(id_str);
+            free(id_str);
+            
+            if (item_id <= 0) {
+                printf("✗ Invalid item id\n");
+                free(line);
+                continue;
+            }
+            
+            cmd_delete(item_id);
         } else if (strcmp(cmd, "get") == 0) {
             // get <id>
             int id = atoi(ptr);
