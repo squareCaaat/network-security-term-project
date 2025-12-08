@@ -30,6 +30,12 @@ int storage_put_item(const char* owner_email, const unsigned char* iv,
 /* 아이템 조회 */
 VaultItem* storage_get_item(int item_id, const char* owner_email);
 
+/* 아이템 수정 */
+int storage_update_item(int item_id, const char* owner_email,
+                        const unsigned char* iv, const unsigned char* tag,
+                        const unsigned char* blob, size_t blob_len,
+                        const char* meta);
+
 /* 아이템 목록 조회 */
 VaultItem** storage_list_items(const char* owner_email, int* count);
 

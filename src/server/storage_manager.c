@@ -108,6 +108,38 @@ VaultItem* storage_get_item(int item_id, const char* owner_email) {
     return NULL;
 }
 
+/* 아이템 수정 */
+int storage_update_item(int item_id, const char* owner_email,
+                        const unsigned char* iv, const unsigned char* tag,
+                        const unsigned char* blob, size_t blob_len,
+                        const char* meta) {
+    for (int i = 0; i < item_count; i++) {
+        if (items[i]->id == item_id &&
+            strcmp(items[i]->owner_email, owner_email) == 0) {
+            memcpy(items[i]->iv, iv, 12);
+            memcpy(items[i]->tag, tag, 16);
+            
+            free(items[i]->blob);
+            items[i]->blob = malloc(blob_len);
+            memcpy(items[i]->blob, blob, blob_len);
+            items[i]->blob_len = blob_len;
+            
+            if (meta) {
+                strncpy(items[i]->meta, meta, sizeof(items[i]->meta) - 1);
+                items[i]->meta[sizeof(items[i]->meta) - 1] = '\0';
+            } else {
+                items[i]->meta[0] = '\0';
+            }
+            
+            storage_manager_cleanup();
+            storage_manager_init();
+            
+            return 0;
+        }
+    }
+    return -1;
+}
+
 /* 아이템 목록 조회 */
 VaultItem** storage_list_items(const char* owner_email, int* count) {
     VaultItem** result = malloc(sizeof(VaultItem*) * MAX_ITEMS);
