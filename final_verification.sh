@@ -2,7 +2,7 @@
 # 최종 검증: 모든 기능 테스트
 
 echo "╔════════════════════════════════════════════════════════╗"
-echo "║   Secure Network Vault - Final Verification Test      ║"
+echo "║   Secure Network Vault - Final Verification Test       ║"
 echo "╚════════════════════════════════════════════════════════╝"
 echo ""
 
