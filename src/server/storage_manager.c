@@ -57,6 +57,10 @@ void storage_manager_cleanup(void) {
             free(items[i]);
         }
     }
+    
+    // 상태 리셋 (init 실패 시 use-after-free 방지)
+    item_count = 0;
+    next_item_id = 1;
 }
 
 /* 아이템 저장 */
@@ -68,12 +72,19 @@ int storage_put_item(const char* owner_email, const unsigned char* iv,
     }
     
     VaultItem* item = malloc(sizeof(VaultItem));
+    if (item == NULL) {
+        return -1;
+    }
     item->id = next_item_id++;
     strncpy(item->owner_email, owner_email, sizeof(item->owner_email) - 1);
     memcpy(item->iv, iv, 12);
     memcpy(item->tag, tag, 16);
     
     item->blob = malloc(blob_len);
+    if (item->blob == NULL) {
+        free(item);
+        return -1;
+    }
     memcpy(item->blob, blob, blob_len);
     item->blob_len = blob_len;
     
@@ -116,12 +127,18 @@ int storage_update_item(int item_id, const char* owner_email,
     for (int i = 0; i < item_count; i++) {
         if (items[i]->id == item_id &&
             strcmp(items[i]->owner_email, owner_email) == 0) {
+            // 먼저 새 blob 준비 (실패 시 원본 데이터 보존)
+            unsigned char* new_blob = malloc(blob_len);
+            if (new_blob == NULL) {
+                return -1;
+            }
+            memcpy(new_blob, blob, blob_len);
+            
+            // 모든 준비가 완료되면 한 번에 업데이트
             memcpy(items[i]->iv, iv, 12);
             memcpy(items[i]->tag, tag, 16);
-            
             free(items[i]->blob);
-            items[i]->blob = malloc(blob_len);
-            memcpy(items[i]->blob, blob, blob_len);
+            items[i]->blob = new_blob;
             items[i]->blob_len = blob_len;
             
             if (meta) {

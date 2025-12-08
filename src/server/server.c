@@ -201,6 +201,52 @@ static char* handle_put(const char* json) {
     return response;
 }
 
+/* UPDATE 핸들러 */
+static char* handle_update(const char* json) {
+    char* token = json_get_string(json, "token");
+    int item_id = json_get_int(json, "item_id");
+    char* iv_b64 = json_get_string(json, "iv");
+    char* tag_b64 = json_get_string(json, "tag");
+    char* blob_b64 = json_get_string(json, "blob");
+    char* meta = json_get_string(json, "meta");
+    
+    if (!token || item_id < 0 || !iv_b64 || !tag_b64 || !blob_b64) {
+        char* response = malloc(256);
+        snprintf(response, 256, "{\"type\":\"RESPONSE\",\"status\":%d,\"message\":\"Missing fields\"}", STATUS_ERROR);
+        free(token); free(iv_b64); free(tag_b64); free(blob_b64); free(meta);
+        return response;
+    }
+    
+    char email[256];
+    if (!auth_verify_token(token, email, sizeof(email))) {
+        char* response = malloc(256);
+        snprintf(response, 256, "{\"type\":\"RESPONSE\",\"status\":%d,\"message\":\"Invalid token\"}",
+                 STATUS_INVALID_TOKEN);
+        free(token); free(iv_b64); free(tag_b64); free(blob_b64); free(meta);
+        return response;
+    }
+    
+    size_t iv_len, tag_len, blob_len;
+    unsigned char* iv = base64_decode(iv_b64, strlen(iv_b64), &iv_len);
+    unsigned char* tag = base64_decode(tag_b64, strlen(tag_b64), &tag_len);
+    unsigned char* blob = base64_decode(blob_b64, strlen(blob_b64), &blob_len);
+    
+    int ret = storage_update_item(item_id, email, iv, tag, blob, blob_len, meta);
+    
+    char* response = malloc(512);
+    if (ret == 0) {
+        snprintf(response, 512, "{\"type\":\"RESPONSE\",\"status\":%d,\"message\":\"Item updated\"}", STATUS_OK);
+    } else {
+        snprintf(response, 512, "{\"type\":\"RESPONSE\",\"status\":%d,\"message\":\"Item not found\"}",
+                 STATUS_NOT_FOUND);
+    }
+    
+    free(token); free(iv_b64); free(tag_b64); free(blob_b64); free(meta);
+    free(iv); free(tag); free(blob);
+    
+    return response;
+}
+
 /* GET 핸들러 */
 static char* handle_get(const char* json) {
     char* token = json_get_string(json, "token");
@@ -295,6 +341,41 @@ static char* handle_list(const char* json) {
     return response;
 }
 
+/* DELETE 핸들러 */
+static char* handle_delete(const char* json) {
+    char* token = json_get_string(json, "token");
+    int item_id = json_get_int(json, "item_id");
+    
+    if (!token || item_id < 0) {
+        char* response = malloc(256);
+        snprintf(response, 256, "{\"type\":\"RESPONSE\",\"status\":%d,\"message\":\"Missing fields\"}", STATUS_ERROR);
+        free(token);
+        return response;
+    }
+    
+    char email[256];
+    if (!auth_verify_token(token, email, sizeof(email))) {
+        char* response = malloc(256);
+        snprintf(response, 256, "{\"type\":\"RESPONSE\",\"status\":%d,\"message\":\"Invalid token\"}",
+                 STATUS_INVALID_TOKEN);
+        free(token);
+        return response;
+    }
+    
+    int ret = storage_delete_item(item_id, email);
+    
+    char* response = malloc(256);
+    if (ret == 0) {
+        snprintf(response, 256, "{\"type\":\"RESPONSE\",\"status\":%d,\"message\":\"Item deleted\"}", STATUS_OK);
+    } else {
+        snprintf(response, 256, "{\"type\":\"RESPONSE\",\"status\":%d,\"message\":\"Item not found\"}",
+                 STATUS_NOT_FOUND);
+    }
+    
+    free(token);
+    return response;
+}
+
 /* 클라이언트 처리 */
 static void handle_client(SSL* ssl) {
     // 클라이언트 연결이 유지되는 동안 여러 요청 처리
@@ -329,10 +410,14 @@ static void handle_client(SSL* ssl) {
             response = handle_login(json);
         } else if (type && strcmp(type, "PUT") == 0) {
             response = handle_put(json);
+        } else if (type && strcmp(type, "UPDATE") == 0) {
+            response = handle_update(json);
         } else if (type && strcmp(type, "GET") == 0) {
             response = handle_get(json);
         } else if (type && strcmp(type, "LIST") == 0) {
             response = handle_list(json);
+        } else if (type && strcmp(type, "DELETE") == 0) {
+            response = handle_delete(json);
         } else {
             response = malloc(256);
             snprintf(response, 256, "{\"type\":\"RESPONSE\",\"status\":%d,\"message\":\"Unknown command\"}", 
